@@ -42,7 +42,7 @@ export function Sidebar() {
           return (
             <Link
               key={it.to}
-              to={it.to}
+              to={it.to as "/"}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                 active
@@ -81,7 +81,7 @@ export function MobileNav() {
         return (
           <Link
             key={it.to}
-            to={it.to}
+            to={it.to as "/"}
             className={cn(
               "flex-1 flex flex-col items-center gap-1 py-2 text-[10px]",
               active ? "text-primary" : "text-sidebar-foreground/60"
