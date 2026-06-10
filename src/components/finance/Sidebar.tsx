@@ -11,14 +11,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const items = [
+type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
+const items: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/transactions", label: "Transações", icon: ArrowLeftRight },
   { to: "/reports", label: "Relatórios", icon: PieChart },
   { to: "/budgets", label: "Orçamentos", icon: Target },
   { to: "/bills", label: "Contas & Faturas", icon: Receipt },
   { to: "/settings", label: "Configurações", icon: Settings },
-] as const;
+];
 
 export function Sidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
