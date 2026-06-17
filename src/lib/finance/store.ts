@@ -1,119 +1,217 @@
 import { useSyncExternalStore } from "react";
-import type { FinanceState, Transaction, Budget, Bill } from "./types";
+import { supabase } from "@/integrations/supabase/client";
+import type { FinanceState, Transaction, Budget, Bill, CategoryId, PaymentMethod, TxKind } from "./types";
 
-const KEY = "finance-app-state-v1";
+const empty = (): FinanceState => ({
+  transactions: [],
+  budgets: [],
+  bills: [],
+  profile: { name: "", email: "" },
+});
 
-const seed = (): FinanceState => {
-  const now = new Date();
-  const ym = now.toISOString().slice(0, 7);
-  const today = now.toISOString().slice(0, 10);
-  return {
-    transactions: [
-      { id: crypto.randomUUID(), kind: "income", description: "Salário", amount: 6500, categoryId: "salario", paymentMethod: "transfer", date: `${ym}-05`, reconciled: true },
-      { id: crypto.randomUUID(), kind: "expense", description: "Aluguel", amount: 1800, categoryId: "moradia", paymentMethod: "transfer", date: `${ym}-10`, reconciled: true },
-      { id: crypto.randomUUID(), kind: "expense", description: "Supermercado", amount: 420, categoryId: "alimentacao", paymentMethod: "debit", date: `${ym}-12` },
-      { id: crypto.randomUUID(), kind: "expense", description: "Restaurante", amount: 180, categoryId: "alimentacao", paymentMethod: "credit", date: today, dueDate: `${ym}-28` },
-      { id: crypto.randomUUID(), kind: "expense", description: "Uber", amount: 95, categoryId: "transporte", paymentMethod: "credit", date: today, dueDate: `${ym}-28` },
-      { id: crypto.randomUUID(), kind: "expense", description: "Cinema", amount: 70, categoryId: "lazer", paymentMethod: "debit", date: `${ym}-14` },
-    ],
-    budgets: [
-      { categoryId: "alimentacao", monthlyLimit: 700 },
-      { categoryId: "transporte", monthlyLimit: 300 },
-      { categoryId: "lazer", monthlyLimit: 250 },
-    ],
-    bills: [
-      { id: crypto.randomUUID(), type: "credit_invoice", description: "Fatura Cartão Nubank", amount: 275, dueDate: `${ym}-28`, paid: false },
-      { id: crypto.randomUUID(), type: "payable", description: "Conta de Luz", amount: 180, dueDate: `${ym}-20`, paid: false },
-      { id: crypto.randomUUID(), type: "receivable", description: "Freelance Design", amount: 1200, dueDate: `${ym}-25`, paid: false },
-    ],
-    profile: { name: "Usuário", email: "voce@exemplo.com" },
-  };
-};
-
-let state: FinanceState = (() => {
-  if (typeof window === "undefined") return seed();
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  const s = seed();
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
-  return s;
-})();
+let state: FinanceState = empty();
+let currentUserId: string | null = null;
+let loading = false;
 
 const listeners = new Set<() => void>();
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
-const emit = () => {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
-  listeners.forEach((l) => l());
-};
+const emit = () => listeners.forEach((l) => l());
 const getSnap = () => state;
-const getServer = () => state;
 
-export const useFinance = () => useSyncExternalStore(subscribe, getSnap, getServer);
+type TxRow = {
+  id: string; kind: string; description: string; amount: number | string;
+  category_id: string; payment_method: string; date: string; due_date: string | null;
+  reconciled: boolean;
+};
+type BillRow = { id: string; type: string; description: string; amount: number | string; due_date: string; paid: boolean };
+
+const rowToTx = (r: TxRow): Transaction => ({
+  id: r.id,
+  kind: r.kind as TxKind,
+  description: r.description,
+  amount: Number(r.amount),
+  categoryId: r.category_id as CategoryId,
+  paymentMethod: r.payment_method as PaymentMethod,
+  date: r.date,
+  dueDate: r.due_date ?? undefined,
+  reconciled: r.reconciled,
+});
+
+const rowToBill = (r: BillRow): Bill => ({
+  id: r.id,
+  type: r.type as Bill["type"],
+  description: r.description,
+  amount: Number(r.amount),
+  dueDate: r.due_date,
+  paid: r.paid,
+});
+
+export async function reloadFinance() {
+  if (!currentUserId) {
+    state = empty();
+    emit();
+    return;
+  }
+  loading = true;
+  const [tx, bg, bl, pr] = await Promise.all([
+    supabase.from("transactions").select("*").order("date", { ascending: false }),
+    supabase.from("budgets").select("*"),
+    supabase.from("bills").select("*").order("due_date", { ascending: true }),
+    supabase.from("profiles").select("name,email").eq("user_id", currentUserId).maybeSingle(),
+  ]);
+  state = {
+    transactions: ((tx.data as TxRow[] | null) ?? []).map(rowToTx),
+    budgets: ((bg.data as { category_id: string; monthly_limit: number | string }[] | null) ?? []).map((r) => ({
+      categoryId: r.category_id as CategoryId,
+      monthlyLimit: Number(r.monthly_limit),
+    })),
+    bills: ((bl.data as BillRow[] | null) ?? []).map(rowToBill),
+    profile: pr.data ?? { name: "", email: "" },
+  };
+  loading = false;
+  emit();
+}
+
+if (typeof window !== "undefined") {
+  supabase.auth.getSession().then(({ data }) => {
+    currentUserId = data.session?.user.id ?? null;
+    void reloadFinance();
+  });
+  supabase.auth.onAuthStateChange((_event, session) => {
+    const newId = session?.user.id ?? null;
+    if (newId !== currentUserId) {
+      currentUserId = newId;
+      void reloadFinance();
+    }
+  });
+}
+
+export const useFinance = () => useSyncExternalStore(subscribe, getSnap, getSnap);
+export const useFinanceLoading = () => loading;
+
+const requireUser = () => {
+  if (!currentUserId) throw new Error("Não autenticado");
+  return currentUserId;
+};
 
 export const financeActions = {
-  addTransaction(t: Omit<Transaction, "id">) {
-    state = { ...state, transactions: [{ ...t, id: crypto.randomUUID() }, ...state.transactions] };
-    emit();
+  async addTransaction(t: Omit<Transaction, "id">) {
+    const uid = requireUser();
+    const { error } = await supabase.from("transactions").insert({
+      user_id: uid,
+      kind: t.kind,
+      description: t.description,
+      amount: t.amount,
+      category_id: t.categoryId,
+      payment_method: t.paymentMethod,
+      date: t.date,
+      due_date: t.dueDate ?? null,
+      reconciled: t.reconciled ?? false,
+    });
+    if (error) throw error;
+    await reloadFinance();
   },
-  updateTransaction(id: string, patch: Partial<Transaction>) {
-    state = { ...state, transactions: state.transactions.map((t) => (t.id === id ? { ...t, ...patch } : t)) };
-    emit();
+  async updateTransaction(id: string, patch: Partial<Transaction>) {
+    requireUser();
+    const row: {
+      description?: string; amount?: number; category_id?: string;
+      payment_method?: string; date?: string; due_date?: string | null;
+      kind?: string; reconciled?: boolean;
+    } = {};
+    if (patch.description !== undefined) row.description = patch.description;
+    if (patch.amount !== undefined) row.amount = patch.amount;
+    if (patch.categoryId !== undefined) row.category_id = patch.categoryId;
+    if (patch.paymentMethod !== undefined) row.payment_method = patch.paymentMethod;
+    if (patch.date !== undefined) row.date = patch.date;
+    if (patch.dueDate !== undefined) row.due_date = patch.dueDate ?? null;
+    if (patch.kind !== undefined) row.kind = patch.kind;
+    if (patch.reconciled !== undefined) row.reconciled = patch.reconciled;
+    const { error } = await supabase.from("transactions").update(row).eq("id", id);
+    if (error) throw error;
+    await reloadFinance();
   },
-  deleteTransaction(id: string) {
-    state = { ...state, transactions: state.transactions.filter((t) => t.id !== id) };
-    emit();
+
+  async deleteTransaction(id: string) {
+    requireUser();
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+    if (error) throw error;
+    await reloadFinance();
   },
-  reverseTransaction(id: string) {
+  async reverseTransaction(id: string) {
     const orig = state.transactions.find((t) => t.id === id);
     if (!orig) return;
-    const reverse: Transaction = {
-      ...orig,
-      id: crypto.randomUUID(),
-      description: `Estorno: ${orig.description}`,
+    await this.addTransaction({
       kind: orig.kind === "expense" ? "income" : "expense",
-      reconciled: false,
+      description: `Estorno: ${orig.description}`,
+      amount: orig.amount,
+      categoryId: orig.categoryId,
+      paymentMethod: orig.paymentMethod,
       date: new Date().toISOString().slice(0, 10),
-    };
-    state = { ...state, transactions: [reverse, ...state.transactions] };
-    emit();
+      reconciled: false,
+    });
   },
-  setBudget(b: Budget) {
-    const exists = state.budgets.find((x) => x.categoryId === b.categoryId);
-    state = {
-      ...state,
-      budgets: exists
-        ? state.budgets.map((x) => (x.categoryId === b.categoryId ? b : x))
-        : [...state.budgets, b],
-    };
-    emit();
+  async setBudget(b: Budget) {
+    const uid = requireUser();
+    const { error } = await supabase.from("budgets").upsert({
+      user_id: uid,
+      category_id: b.categoryId,
+      monthly_limit: b.monthlyLimit,
+    });
+    if (error) throw error;
+    await reloadFinance();
   },
-  deleteBudget(categoryId: string) {
-    state = { ...state, budgets: state.budgets.filter((b) => b.categoryId !== categoryId) };
-    emit();
+  async deleteBudget(categoryId: string) {
+    const uid = requireUser();
+    const { error } = await supabase.from("budgets").delete().eq("user_id", uid).eq("category_id", categoryId);
+    if (error) throw error;
+    await reloadFinance();
   },
-  addBill(b: Omit<Bill, "id">) {
-    state = { ...state, bills: [{ ...b, id: crypto.randomUUID() }, ...state.bills] };
-    emit();
+  async addBill(b: Omit<Bill, "id">) {
+    const uid = requireUser();
+    const { error } = await supabase.from("bills").insert({
+      user_id: uid,
+      type: b.type,
+      description: b.description,
+      amount: b.amount,
+      due_date: b.dueDate,
+      paid: b.paid,
+    });
+    if (error) throw error;
+    await reloadFinance();
   },
-  toggleBillPaid(id: string) {
-    state = { ...state, bills: state.bills.map((b) => (b.id === id ? { ...b, paid: !b.paid } : b)) };
-    emit();
+  async toggleBillPaid(id: string) {
+    requireUser();
+    const cur = state.bills.find((b) => b.id === id);
+    if (!cur) return;
+    const { error } = await supabase.from("bills").update({ paid: !cur.paid }).eq("id", id);
+    if (error) throw error;
+    await reloadFinance();
   },
-  deleteBill(id: string) {
-    state = { ...state, bills: state.bills.filter((b) => b.id !== id) };
-    emit();
+  async deleteBill(id: string) {
+    requireUser();
+    const { error } = await supabase.from("bills").delete().eq("id", id);
+    if (error) throw error;
+    await reloadFinance();
   },
-  updateProfile(p: Partial<FinanceState["profile"]>) {
-    state = { ...state, profile: { ...state.profile, ...p } };
-    emit();
+  async updateProfile(p: Partial<FinanceState["profile"]>) {
+    const uid = requireUser();
+    const { error } = await supabase.from("profiles").update(p).eq("user_id", uid);
+    if (error) throw error;
+    await reloadFinance();
   },
   exportData() {
     return JSON.stringify(state, null, 2);
   },
-  resetAll() {
-    state = seed();
+  async deleteAccountData() {
+    const uid = requireUser();
+    await Promise.all([
+      supabase.from("transactions").delete().eq("user_id", uid),
+      supabase.from("budgets").delete().eq("user_id", uid),
+      supabase.from("bills").delete().eq("user_id", uid),
+    ]);
+    await supabase.auth.signOut();
+    state = empty();
+    currentUserId = null;
     emit();
   },
 };

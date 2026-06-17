@@ -1,12 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { PageHeader } from "@/components/finance/StatCard";
 import { useFinance, financeActions } from "@/lib/finance/store";
+import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck, Lock, Download, Trash2, Globe, KeyRound } from "lucide-react";
+import { ShieldCheck, Lock, Download, Trash2, Globe, KeyRound, LogOut } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/settings")({
@@ -15,9 +16,12 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const navigate = useNavigate();
   const { profile } = useFinance();
   const [name, setName] = useState(profile.name);
   const [email, setEmail] = useState(profile.email);
+
+  useEffect(() => { setName(profile.name); setEmail(profile.email); }, [profile.name, profile.email]);
 
   const exportData = () => {
     const json = financeActions.exportData();
@@ -31,23 +35,42 @@ function SettingsPage() {
     toast.success("Dados exportados em conformidade com a LGPD");
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    navigate({ to: "/auth" });
+  };
+
+  const deleteAccount = async () => {
+    try {
+      await financeActions.deleteAccountData();
+      toast.success("Conta e dados removidos");
+      navigate({ to: "/auth" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao excluir");
+    }
+  };
+
   return (
     <>
-      <PageHeader title="Configurações" description="Perfil, segurança e privacidade." />
+      <PageHeader
+        title="Configurações"
+        description="Perfil, segurança e privacidade."
+        action={<Button variant="outline" onClick={signOut}><LogOut className="size-4" /> Sair</Button>}
+      />
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-card)] space-y-3">
           <h2 className="font-semibold">Perfil</h2>
           <div><Label>Nome</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><Label>E-mail</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-          <Button onClick={() => { financeActions.updateProfile({ name, email }); toast.success("Perfil atualizado"); }}>Salvar perfil</Button>
+          <div><Label>E-mail</Label><Input type="email" value={email} disabled /></div>
+          <Button onClick={async () => { await financeActions.updateProfile({ name }); toast.success("Perfil atualizado"); }}>Salvar perfil</Button>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-card)] space-y-3">
           <h2 className="font-semibold flex items-center gap-2"><ShieldCheck className="size-4 text-primary" />Segurança</h2>
           <SecurityRow icon={<KeyRound className="size-4" />} title="Criptografia AES-256" description="Todos os dados financeiros e senhas são armazenados com criptografia AES-256 em repouso." status="Ativo" />
           <SecurityRow icon={<Globe className="size-4" />} title="Conexão HTTPS" description="Comunicação ponta a ponta protegida com TLS 1.3." status="Ativo" />
-          <SecurityRow icon={<Lock className="size-4" />} title="Autenticação de dois fatores" description="Adicione uma camada extra de segurança ao seu acesso." status="Recomendado" />
+          <SecurityRow icon={<Lock className="size-4" />} title="Senhas comprometidas bloqueadas" description="Senhas vazadas em outros serviços são automaticamente rejeitadas." status="Ativo" />
         </div>
 
         <div className="lg:col-span-2 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-card)] space-y-4">
@@ -67,12 +90,12 @@ function SettingsPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Excluir conta e todos os dados?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Esta ação remove permanentemente todas as suas transações, orçamentos e configurações. Não pode ser desfeita.
+                    Esta ação remove permanentemente todas as suas transações, orçamentos, contas e desconecta sua sessão. Não pode ser desfeita.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => { financeActions.resetAll(); toast.success("Dados removidos"); }}>Confirmar exclusão</AlertDialogAction>
+                  <AlertDialogAction onClick={deleteAccount}>Confirmar exclusão</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>

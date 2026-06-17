@@ -4,15 +4,19 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Sidebar, MobileNav } from "@/components/finance/Sidebar";
+import { supabase } from "@/integrations/supabase/client";
+
 
 function NotFoundComponent() {
   return (
@@ -96,18 +100,49 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const [authState, setAuthState] = useState<"loading" | "in" | "out">("loading");
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthState(data.session ? "in" : "out");
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setAuthState(session ? "in" : "out");
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (authState === "out" && pathname !== "/auth") {
+      navigate({ to: "/auth" });
+    }
+  }, [authState, pathname, navigate]);
+
+  const isAuthRoute = pathname === "/auth";
+
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen flex bg-background">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <main className="flex-1 px-4 md:px-8 py-6 md:py-8 max-w-[1400px] w-full mx-auto">
-            <Outlet />
-          </main>
-          <MobileNav />
+      {isAuthRoute ? (
+        <Outlet />
+      ) : authState === "loading" ? (
+        <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">Carregando...</div>
+      ) : authState === "out" ? (
+        <div className="min-h-screen flex items-center justify-center bg-background text-sm text-muted-foreground">Redirecionando...</div>
+      ) : (
+        <div className="min-h-screen flex bg-background">
+          <Sidebar />
+          <div className="flex-1 flex flex-col min-w-0">
+            <main className="flex-1 px-4 md:px-8 py-6 md:py-8 max-w-[1400px] w-full mx-auto">
+              <Outlet />
+            </main>
+            <MobileNav />
+          </div>
         </div>
-      </div>
+      )}
       <Toaster richColors closeButton position="top-right" />
     </QueryClientProvider>
   );
 }
+
