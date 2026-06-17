@@ -31,7 +31,7 @@ export function NewTransactionDialog({ defaultKind = "expense" }: { defaultKind?
   const [amount, setAmount] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = schema.safeParse({ description, amount, date, categoryId: category, kind, paymentMethod: method, dueDate });
     if (!parsed.success) {
@@ -44,15 +44,20 @@ export function NewTransactionDialog({ defaultKind = "expense" }: { defaultKind?
       setErrors({ dueDate: "Vencimento da fatura é obrigatório para cartão de crédito" });
       return;
     }
-    financeActions.addTransaction({
-      ...parsed.data,
-      categoryId: parsed.data.categoryId as CategoryId,
-      dueDate: parsed.data.paymentMethod === "credit" ? parsed.data.dueDate : undefined,
-    });
-    toast.success("Transação registrada");
-    setOpen(false);
-    setDescription(""); setAmount(""); setErrors({});
+    try {
+      await financeActions.addTransaction({
+        ...parsed.data,
+        categoryId: parsed.data.categoryId as CategoryId,
+        dueDate: parsed.data.paymentMethod === "credit" ? parsed.data.dueDate : undefined,
+      });
+      toast.success("Transação registrada");
+      setOpen(false);
+      setDescription(""); setAmount(""); setErrors({});
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+    }
   };
+
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
