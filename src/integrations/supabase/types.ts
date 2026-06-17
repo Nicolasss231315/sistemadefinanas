@@ -14,7 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bills: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          due_date: string
+          id: string
+          paid: boolean
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description: string
+          due_date: string
+          id?: string
+          paid?: boolean
+          type: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          due_date?: string
+          id?: string
+          paid?: boolean
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      budgets: {
+        Row: {
+          category_id: string
+          monthly_limit: number
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          monthly_limit: number
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          monthly_limit?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          email: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          email?: string
+          name?: string
+          user_id: string
+        }
+        Update: {
+          email?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transactions: {
+        Row: {
+          amount: number
+          category_id: string
+          created_at: string
+          date: string
+          description: string
+          due_date: string | null
+          id: string
+          kind: string
+          payment_method: string
+          reconciled: boolean
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          category_id: string
+          created_at?: string
+          date: string
+          description: string
+          due_date?: string | null
+          id?: string
+          kind: string
+          payment_method: string
+          reconciled?: boolean
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          category_id?: string
+          created_at?: string
+          date?: string
+          description?: string
+          due_date?: string | null
+          id?: string
+          kind?: string
+          payment_method?: string
+          reconciled?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
