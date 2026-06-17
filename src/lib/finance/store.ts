@@ -113,7 +113,11 @@ export const financeActions = {
   },
   async updateTransaction(id: string, patch: Partial<Transaction>) {
     requireUser();
-    const row: Record<string, unknown> = {};
+    const row: {
+      description?: string; amount?: number; category_id?: string;
+      payment_method?: string; date?: string; due_date?: string | null;
+      kind?: string; reconciled?: boolean;
+    } = {};
     if (patch.description !== undefined) row.description = patch.description;
     if (patch.amount !== undefined) row.amount = patch.amount;
     if (patch.categoryId !== undefined) row.category_id = patch.categoryId;
@@ -126,6 +130,7 @@ export const financeActions = {
     if (error) throw error;
     await reloadFinance();
   },
+
   async deleteTransaction(id: string) {
     requireUser();
     const { error } = await supabase.from("transactions").delete().eq("id", id);
